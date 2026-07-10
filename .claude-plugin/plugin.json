@@ -7,7 +7,7 @@
   },
   "homepage": "https://github.com/uehaj/review-wizard",
   "repository": "https://github.com/uehaj/review-wizard",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "keywords": [
     "wizard",
     "ask-user-question",
