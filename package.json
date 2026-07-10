@@ -1,0 +1,9 @@
+{
+  "name": "review-wizard",
+  "private": true,
+  "type": "module",
+  "description": "複数の質問をブラウザのウィザードUIで提示し回答JSONを取得するツール（AskUserQuestionのブラウザ版）— Node 23.6+ の型剥がしで直接実行。ビルド工程・外部依存なし",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.ts\""
+  }
+}
