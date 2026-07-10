@@ -17,21 +17,21 @@ SR-28/ADR-005）から切り出したもの（ADR-006）。以後の修正はこ
 ### マーケットプレイス経由
 
 ```bash
-claude plugin marketplace add /path/to/20260710_review_wizard
+claude plugin marketplace add /path/to/review-wizard
 claude plugin install review-wizard@review-wizard-marketplace
 ```
 
 GitHub に置く場合は `marketplace add` にリポジトリ URL を渡せばよい。
 
 ```bash
-claude plugin marketplace add https://github.com/<owner>/20260710_review_wizard.git
+claude plugin marketplace add https://github.com/uehaj/review-wizard.git
 claude plugin install review-wizard@review-wizard-marketplace
 ```
 
 ### ローカル確認（開発・検証時）
 
 ```bash
-claude --plugin-dir /path/to/20260710_review_wizard
+claude --plugin-dir /path/to/review-wizard
 ```
 
 マニフェストの妥当性は次で検証できる。
