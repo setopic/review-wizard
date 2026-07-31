@@ -201,7 +201,46 @@ test("server flow: GET serves the wizard, wrong token 404s, invalid POST 400s, v
 });
 
 // ---------------------------------------------------------------------------
-// 3. タイムアウト
+// 3. リッチ説明 (--rich / question.detail)
+// ---------------------------------------------------------------------------
+
+const DETAIL_QUESTIONS = {
+  title: "リッチ説明テスト",
+  questions: [
+    {
+      question: "この方式でよいですか？",
+      header: "方式",
+      options: [{ label: "はい" }, { label: "いいえ" }],
+      detail: "<table><tr><th>項目</th><th>値</th></tr><tr><td>DETAILTOKEN_XYZ</td><td>42</td></tr></table>",
+    },
+  ],
+};
+
+test("--rich embeds question.detail; without --rich the detail is stripped", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, DETAIL_QUESTIONS);
+
+  // --rich あり: detail が配信 HTML(埋め込み JSON)に含まれる
+  const rich = await startReview(["--no-open", "--rich", "--questions", qpath, "--port", "0"]);
+  try {
+    const html = await (await fetch(rich.url)).text();
+    assert.ok(html.includes("DETAILTOKEN_XYZ"), "with --rich, detail should be embedded");
+  } finally {
+    if (rich.proc.exitCode === null && !rich.proc.killed) rich.proc.kill();
+  }
+
+  // --rich なし: detail は配信されない（HTML 注入自体が起きない）
+  const plain = await startReview(["--no-open", "--questions", qpath, "--port", "0"]);
+  try {
+    const html = await (await fetch(plain.url)).text();
+    assert.ok(!html.includes("DETAILTOKEN_XYZ"), "without --rich, detail should be stripped");
+  } finally {
+    if (plain.proc.exitCode === null && !plain.proc.killed) plain.proc.kill();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 4. タイムアウト
 // ---------------------------------------------------------------------------
 
 test("exits 2 on timeout when no answer is submitted", async () => {

@@ -42,6 +42,7 @@ interface Question {
   header?: string;
   multiSelect?: boolean;
   options: QuestionOption[];
+  detail?: string; // 任意。--rich 指定時のみ、信頼 HTML として質問文の下に描画する。
 }
 
 interface QuestionsDoc {
@@ -67,6 +68,7 @@ interface CliOptions {
   timeoutSec: number;
   noOpen: boolean;
   port: number;
+  rich: boolean; // true のとき question.detail を信頼 HTML として描画する。
 }
 
 // ---------------------------------------------------------------------------
@@ -133,9 +135,16 @@ function validateQuestionsDoc(raw: unknown): QuestionsDoc {
       return description !== undefined ? { label, description } : { label };
     });
 
+    const detailRaw = qRaw["detail"];
+    if (detailRaw !== undefined && typeof detailRaw !== "string") {
+      throw new Error(`review_wizard: questions[${i}].detail は文字列である必要があります。`);
+    }
+    const detail = typeof detailRaw === "string" && detailRaw !== "" ? detailRaw : undefined;
+
     const q: Question = { question: questionText, options };
     if (header !== undefined) q.header = header;
     if (multiSelect) q.multiSelect = true;
+    if (detail !== undefined) q.detail = detail;
     return q;
   });
 
@@ -201,33 +210,67 @@ function validateAnswersPayload(
 // ---------------------------------------------------------------------------
 
 const WIZARD_CSS = `
-body { font-family: "Hiragino Sans", "Yu Gothic", sans-serif; line-height: 1.7; max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; color: #222; background: #fafafa; }
-h1 { font-size: 1.25rem; margin-bottom: .3rem; }
-.rv-progress { margin: 1rem 0 1.6rem; }
-.rv-progress-track { background: #eee; border-radius: 999px; height: .5rem; overflow: hidden; }
-.rv-progress-fill { height: 100%; background: #534AB7; width: 0%; transition: width .2s ease; }
-.rv-progress-label { font-size: .82rem; color: #666; margin-top: .3rem; }
-.rv-card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 1.4rem 1.5rem; margin-bottom: 1.2rem; }
-.rv-header-chip { display: inline-block; background: #EEEDFE; color: #534AB7; font-size: .8rem; font-weight: bold; padding: .2rem .7rem; border-radius: 999px; margin-bottom: .6rem; }
-.rv-question { font-size: 1.05rem; font-weight: bold; margin: 0 0 1rem; white-space: pre-wrap; }
-.rv-option { display: block; border: 1px solid #ddd; border-radius: 8px; padding: .7rem .9rem; margin-bottom: .6rem; cursor: pointer; }
-.rv-option:hover { border-color: #b9b3e6; background: #fbfaff; }
-.rv-option.selected { border-color: #534AB7; background: #F7F6FD; }
-.rv-option input { margin-right: .5rem; }
+:root {
+  --rv-bg: #F7F2E7;
+  --rv-card: #FFFDF8;
+  --rv-card-border: #E7DDC8;
+  --rv-ink: #3E362B;
+  --rv-ink-soft: #7A6E5C;
+  --rv-ink-faint: #9C8F79;
+  --rv-accent: #8A6D4B;
+  --rv-accent-strong: #6E5638;
+  --rv-accent-soft: #EFE4D0;
+  --rv-accent-border: #D8C7A6;
+  --rv-line: #E7DDC8;
+  --rv-error-ink: #8A4A2E;
+  --rv-error-bg: #F6E7DD;
+  --rv-error-border: #E2C1A8;
+}
+body { font-family: "Hiragino Sans", "Yu Gothic", sans-serif; line-height: 1.8; max-width: 760px; margin: 0 auto; padding: 3rem 2rem; color: var(--rv-ink); background: var(--rv-bg); }
+h1 { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 1.35rem; font-weight: normal; margin-bottom: .5rem; color: var(--rv-ink); }
+.rv-stepper { display: flex; align-items: flex-start; margin: 1.4rem 0 2rem; overflow-x: auto; padding-bottom: .3rem; }
+.rv-step { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; max-width: 6rem; text-align: center; }
+.rv-step.nav { cursor: pointer; }
+.rv-step-marker { width: 1.9rem; height: 1.9rem; border-radius: 50%; border: 2px solid var(--rv-card-border); color: var(--rv-ink-faint); background: var(--rv-card); display: flex; align-items: center; justify-content: center; font-size: .9rem; font-weight: bold; transition: all .15s ease; }
+.rv-step.current .rv-step-marker { border-color: var(--rv-accent); background: var(--rv-accent); color: #fff; box-shadow: 0 0 0 4px var(--rv-accent-soft); }
+.rv-step.done .rv-step-marker { border-color: var(--rv-accent); background: var(--rv-accent); color: #fff; }
+.rv-step.nav:hover .rv-step-marker { border-color: var(--rv-accent); }
+.rv-step-label { font-size: .75rem; color: var(--rv-ink-faint); margin-top: .4rem; line-height: 1.4; word-break: break-word; }
+.rv-step.current .rv-step-label { color: var(--rv-accent-strong); font-weight: bold; }
+.rv-step.done .rv-step-label { color: var(--rv-accent-strong); }
+.rv-step-conn { flex: 1 1 auto; height: 2px; background: var(--rv-line); margin: .95rem .3rem 0; min-width: 1rem; }
+.rv-step-conn.done { background: var(--rv-accent); }
+.rv-card { background: var(--rv-card); border: 1px solid var(--rv-card-border); border-radius: 10px; padding: 2.2rem 2.4rem; margin-bottom: 1.6rem; }
+.rv-header-chip { display: inline-block; background: var(--rv-accent-soft); color: var(--rv-accent-strong); font-size: .8rem; font-weight: bold; padding: .25rem .8rem; border-radius: 999px; margin-bottom: .9rem; }
+.rv-question { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 1.15rem; font-weight: normal; margin: 0 0 1.4rem; line-height: 1.8; white-space: pre-wrap; }
+.rv-detail { margin: 0 0 1.6rem; font-size: .92rem; color: var(--rv-ink-soft); line-height: 1.8; overflow-x: auto; }
+.rv-detail img, .rv-detail svg { max-width: 100%; height: auto; }
+.rv-detail table { border-collapse: collapse; width: 100%; margin: .6rem 0; font-size: .88rem; }
+.rv-detail th, .rv-detail td { border: 1px solid var(--rv-line); padding: .5rem .8rem; text-align: left; }
+.rv-detail th { background: var(--rv-accent-soft); color: var(--rv-accent-strong); }
+.rv-detail pre { background: var(--rv-accent-soft); border: 1px solid var(--rv-card-border); border-radius: 6px; padding: .8rem 1rem; overflow-x: auto; }
+.rv-detail code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rv-option { display: block; border: 1px solid var(--rv-card-border); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: .9rem; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.rv-option:hover { border-color: var(--rv-accent); background: var(--rv-accent-soft); }
+.rv-option.selected { border-color: var(--rv-accent); background: var(--rv-accent-soft); }
+.rv-option input { margin-right: .6rem; accent-color: var(--rv-accent); }
 .rv-option-label { font-weight: bold; }
-.rv-option-desc { color: #666; font-size: .85rem; margin-top: .2rem; margin-left: 1.4rem; }
-.rv-other { margin-top: .6rem; }
-.rv-other label { display: block; font-size: .85rem; color: #666; margin-bottom: .3rem; }
-.rv-other input { width: 100%; box-sizing: border-box; padding: .5rem .6rem; border: 1px solid #ccc; border-radius: 6px; font: inherit; }
-.rv-nav { display: flex; justify-content: space-between; gap: .6rem; }
-.rv-nav button { font: inherit; padding: .55rem 1.2rem; border-radius: 6px; border: 1px solid #534AB7; background: #534AB7; color: #fff; cursor: pointer; }
-.rv-nav button.secondary { background: #fff; color: #534AB7; }
-.rv-nav button:disabled { opacity: .4; cursor: not-allowed; }
-.rv-summary-row { border-bottom: 1px solid #eee; padding: .6rem 0; }
-.rv-summary-q { font-weight: bold; }
-.rv-summary-a { color: #333; margin: .2rem 0; }
-.rv-summary-edit { font-size: .82rem; color: #534AB7; cursor: pointer; text-decoration: underline; background: none; border: none; font: inherit; padding: 0; }
-.rv-error { color: #993C1D; background: #FBEDEA; border: 1px solid #f0c9c0; border-radius: 6px; padding: .6rem .8rem; margin-bottom: 1rem; font-size: .88rem; }
+.rv-option-desc { color: var(--rv-ink-soft); font-size: .85rem; margin-top: .3rem; margin-left: 1.4rem; line-height: 1.7; }
+.rv-other { margin-top: .9rem; }
+.rv-other label { display: block; font-size: .85rem; color: var(--rv-ink-soft); margin-bottom: .4rem; }
+.rv-other input { width: 100%; box-sizing: border-box; padding: .6rem .7rem; border: 1px solid var(--rv-card-border); border-radius: 6px; font: inherit; background: var(--rv-card); color: var(--rv-ink); }
+.rv-other input:focus { outline: none; border-color: var(--rv-accent); box-shadow: 0 0 0 3px var(--rv-accent-soft); }
+.rv-nav { display: flex; justify-content: space-between; gap: .8rem; }
+.rv-nav button { font: inherit; padding: .65rem 1.4rem; border-radius: 6px; border: 1px solid var(--rv-accent); background: var(--rv-accent); color: #fff; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.rv-nav button:hover:not(:disabled) { background: var(--rv-accent-strong); border-color: var(--rv-accent-strong); }
+.rv-nav button.secondary { background: transparent; color: var(--rv-accent-strong); }
+.rv-nav button.secondary:hover:not(:disabled) { background: var(--rv-accent-soft); }
+.rv-nav button:disabled { opacity: .45; cursor: not-allowed; }
+.rv-summary-row { border-bottom: 1px solid var(--rv-line); padding: .9rem 0; }
+.rv-summary-q { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-weight: normal; font-size: 1.02rem; }
+.rv-summary-a { color: var(--rv-ink-soft); margin: .35rem 0; line-height: 1.8; }
+.rv-summary-edit { font-size: .82rem; color: var(--rv-accent-strong); cursor: pointer; text-decoration: underline; background: none; border: none; font: inherit; padding: 0; }
+.rv-error { color: var(--rv-error-ink); background: var(--rv-error-bg); border: 1px solid var(--rv-error-border); border-radius: 6px; padding: .8rem 1rem; margin-bottom: 1.4rem; font-size: .88rem; }
 `;
 
 // クライアント JS（外部依存なし。テンプレートリテラルの入れ子を避けるため文字列連結のみで書く。
@@ -243,8 +286,7 @@ const CLIENT_SCRIPT = String.raw`(function () {
   var totalSteps = questions.length + 1;
 
   var titleEl = document.getElementById("rv-title");
-  var fillEl = document.getElementById("rv-progress-fill");
-  var labelEl = document.getElementById("rv-progress-label");
+  var stepperEl = document.getElementById("rv-stepper");
   var cardEl = document.getElementById("rv-card");
   var backBtn = document.getElementById("rv-back");
   var nextBtn = document.getElementById("rv-next");
@@ -260,13 +302,30 @@ const CLIENT_SCRIPT = String.raw`(function () {
     return s.selected.length > 0 || s.other.trim() !== "";
   }
 
-  function renderProgress() {
-    var shownStep = Math.min(step, questions.length) + 1;
-    var pct = Math.round((shownStep / totalSteps) * 100);
-    fillEl.style.width = pct + "%";
-    labelEl.textContent = step < questions.length
-      ? "質問 " + (step + 1) + " / " + questions.length
-      : "確認（全 " + questions.length + " 問）";
+  function renderStepper() {
+    var html = "";
+    for (var j = 0; j < totalSteps; j++) {
+      var isConfirm = j === questions.length;
+      var label = isConfirm ? "確認" : (questions[j].header || ("質問" + (j + 1)));
+      var done = !isConfirm && answered(j) && j !== step;
+      var current = j === step;
+      var navigable = j <= step && !current; // 戻る方向のみクリック可
+      var cls = "rv-step" + (current ? " current" : "") + (done ? " done" : "") + (navigable ? " nav" : "");
+      var marker = done ? "✓" : String(j + 1);
+      html += '<div class="' + cls + '" data-step="' + j + '">' +
+        '<div class="rv-step-marker">' + marker + "</div>" +
+        '<div class="rv-step-label">' + esc(label) + "</div></div>";
+      if (j < totalSteps - 1) {
+        html += '<div class="rv-step-conn' + (j < step ? " done" : "") + '"></div>';
+      }
+    }
+    stepperEl.innerHTML = html;
+    Array.prototype.forEach.call(stepperEl.querySelectorAll(".rv-step.nav"), function (el) {
+      el.addEventListener("click", function () {
+        var j = Number(el.getAttribute("data-step"));
+        if (j <= step) { step = j; render(); }
+      });
+    });
   }
 
   function renderQuestion() {
@@ -275,6 +334,8 @@ const CLIENT_SCRIPT = String.raw`(function () {
     var html = "";
     if (q.header) html += '<div class="rv-header-chip">' + esc(q.header) + "</div>";
     html += '<div class="rv-question">' + esc(q.question) + "</div>";
+    // detail は --rich 指定時のみサーバがデータに含める。信頼 HTML として非エスケープで挿入する。
+    if (q.detail) html += '<div class="rv-detail">' + q.detail + "</div>";
     var inputType = q.multiSelect ? "checkbox" : "radio";
     q.options.forEach(function (opt, i) {
       var checked = s.selected.indexOf(opt.label) !== -1;
@@ -341,7 +402,7 @@ const CLIENT_SCRIPT = String.raw`(function () {
   }
 
   function render() {
-    renderProgress();
+    renderStepper();
     if (step < questions.length) renderQuestion(); else renderSummary();
     updateNav();
   }
@@ -408,13 +469,21 @@ const CLIENT_SCRIPT = String.raw`(function () {
 /** 質問データを <script type="application/json"> に埋め込む安全な JSON 文字列化。
  * req_status.ts の explorerDataJson と同じ流儀（`<` を < にして </script> 混入を防ぐ）。
  */
-function reviewDataJson(doc: QuestionsDoc, postUrl: string): string {
-  const data = { title: doc.title, questions: doc.questions, postUrl };
+function reviewDataJson(doc: QuestionsDoc, postUrl: string, rich: boolean): string {
+  // --rich が無ければ detail をクライアントへ渡さない（HTML 注入自体を起こさない）。
+  const questions = rich
+    ? doc.questions
+    : doc.questions.map((q) => {
+        if (q.detail === undefined) return q;
+        const { detail, ...rest } = q;
+        return rest;
+      });
+  const data = { title: doc.title, questions, postUrl };
   return JSON.stringify(data).replace(/</g, "\\u003c");
 }
 
-function buildWizardHtml(doc: QuestionsDoc, answersPath: string): string {
-  const dataJson = reviewDataJson(doc, answersPath);
+function buildWizardHtml(doc: QuestionsDoc, answersPath: string, rich: boolean): string {
+  const dataJson = reviewDataJson(doc, answersPath, rich);
   return [
     "<!doctype html>",
     '<html lang="ja">',
@@ -427,8 +496,7 @@ function buildWizardHtml(doc: QuestionsDoc, answersPath: string): string {
     "<body>",
     '<div id="app">',
     '<h1 id="rv-title"></h1>',
-    '<div class="rv-progress"><div class="rv-progress-track"><div class="rv-progress-fill" id="rv-progress-fill"></div></div>' +
-      '<div class="rv-progress-label" id="rv-progress-label"></div></div>',
+    '<div class="rv-stepper" id="rv-stepper"></div>',
     '<div class="rv-card" id="rv-card"></div>',
     '<div class="rv-nav"><button type="button" id="rv-back" class="secondary">戻る</button>' +
       '<button type="button" id="rv-next">次へ</button></div>',
@@ -444,9 +512,9 @@ function completionHtml(): string {
   return [
     "<!doctype html>",
     '<html lang="ja"><head><meta charset="UTF-8"><title>送信完了 — レビュー</title>',
-    "<style>body{font-family:\"Hiragino Sans\",\"Yu Gothic\",sans-serif;max-width:32rem;margin:4rem auto;padding:0 1.5rem;color:#222;text-align:center;}",
-    ".card{border:1px solid #ded9f5;border-radius:10px;padding:2rem 1.5rem;background:#F7F6FD;}",
-    "h1{font-size:1.1rem;color:#534AB7;}</style></head>",
+    "<style>body{font-family:\"Hiragino Sans\",\"Yu Gothic\",sans-serif;max-width:32rem;margin:4rem auto;padding:0 1.5rem;color:#3E362B;background:#F7F2E7;text-align:center;line-height:1.8;}",
+    ".card{border:1px solid #E7DDC8;border-radius:10px;padding:2.4rem 2rem;background:#FFFDF8;}",
+    "h1{font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif;font-weight:normal;font-size:1.15rem;color:#8A6D4B;}</style></head>",
     '<body><div class="card"><h1>回答を送信しました</h1><p>このタブは閉じて構いません。</p></div></body></html>',
   ].join("\n");
 }
@@ -509,7 +577,7 @@ function requestListener(
     }
 
     if (req.method === "GET" && (pathname === wizardPath || pathname === wizardPathNoSlash)) {
-      const html = buildWizardHtml(doc, answersPath);
+      const html = buildWizardHtml(doc, answersPath, opts.rich);
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", Connection: "close" });
       res.end(html);
       return;
@@ -633,6 +701,7 @@ async function main(): Promise<number> {
       timeout: { type: "string", default: "600" },
       "no-open": { type: "boolean", default: false },
       port: { type: "string", default: "0" },
+      rich: { type: "boolean", default: false },
     },
   });
 
@@ -684,6 +753,7 @@ async function main(): Promise<number> {
     timeoutSec,
     noOpen: Boolean(values["no-open"]),
     port,
+    rich: Boolean(values.rich),
   };
 
   return runWizardServer(doc, opts);

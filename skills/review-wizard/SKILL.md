@@ -1,6 +1,6 @@
 ---
 name: review-wizard
-description: ユーザーへの質問が3問以上あるとき、選択肢の説明が長く比較検討が要るとき、まとめてレビュー/裁定を求めるときに、AskUserQuestion の代わりに使う。ブラウザのウィザードUIで進捗表示つきの複数質問（選択肢・複数選択・自由記述）を提示し、回答結果をJSONで受け取る。1〜2問の即答で済む確認はターミナル内のAskUserQuestionのままでよく、本ツールは使わない。
+description: ユーザーへの選択式の質問が3問以上あるとき、または選択肢の比較検討が要るときに、AskUserQuestion の代わりに使うツール。ブラウザのウィザードUIでステッパー（現在位置表示）つきの複数質問（選択肢・複数選択・自由記述）を提示し、回答結果をJSONで受け取る。--rich を付ければ図版・表つきのリッチな説明（question.detail）も出せる。1〜2問の即答やブラウザ（GUI）が使えない環境では AskUserQuestion を使う。
 ---
 
 # review-wizard — ブラウザ・ウィザードでの複数質問
@@ -10,9 +10,11 @@ AskUserQuestion のブラウザ版。複数の質問（選択肢・複数選択�
 
 ## 使い分け
 
-- **本ツールを使う**: 質問が 3 問以上ある／選択肢の説明が長く比較検討が要る／設計や
-  裁定をまとめてレビューしてもらう場面。
-- **ターミナル内（AskUserQuestion）のままでよい**: 1〜2 問の即答で済む確認。
+- **このツールを使う**: 質問が 3 問以上ある／選択肢の比較検討が要る（図・表・スクショが
+  効く）／設計や裁定をまとめてレビューしてもらう場面。図・表・スクショが判断に効くときは
+  `--rich` を付け、質問に `detail` を添える。
+- **AskUserQuestion を使う**: 1〜2 問の即答で済む確認、またはブラウザ（GUI）が使えない
+  環境（CI・ヘッドレス・`open` 不可のリモート等）。
 
 ## 手順
 
@@ -31,7 +33,8 @@ AskUserQuestion のブラウザ版。複数の質問（選択肢・複数選択�
       "options": [
         { "label": "選択肢A", "description": "補足説明（省略可）" },
         { "label": "選択肢B", "description": "補足説明（省略可）" }
-      ]
+      ],
+      "detail": "<table>…</table> / <svg>…</svg> 等のリッチ説明（省略可・--rich 時のみ描画）"
     }
   ]
 }
@@ -40,6 +43,13 @@ AskUserQuestion のブラウザ版。複数の質問（選択肢・複数選択�
 - `questions` は 1 件以上、各質問の `options` は 2 件以上必須。
 - `multiSelect: true` で複数選択可、既定は単一選択。
 - 各質問には「その他」自由記述欄が自動で付く（options に含める必要はない）。
+- **図版・表で質問の意図を詳しく説明したいとき**は、質問に任意の `detail` を足し、実行時に
+  `--rich` を付ける。`detail` は質問文の下に **信頼 HTML** として描画される。
+  - 表は `<table>`、図は **インライン `<svg>`** で書く。画像は **`data:` URI**（例
+    `<img src="data:image/png;base64,...">`）で埋め込む。**外部 URL は使わない**（オフライン維持）。
+  - `--rich` を付けないと `detail` は描画されない（プレーン表示・安全側の既定）。
+  - `detail` は自分（エージェント）が生成する信頼できる内容に限る。図は自分で SVG を書くか、
+    生成した図を data: URI 画像として埋め込む（Mermaid 等のランタイム依存は持ち込まない）。
 
 ### 2. バックグラウンドで実行する
 
@@ -48,6 +58,13 @@ AskUserQuestion のブラウザ版。複数の質問（選択肢・複数選択�
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/review_wizard.ts" \
   --questions <in.json> --out <out.json> --timeout 1800
+```
+
+図版・表つきの `detail` を描画するときは `--rich` を付ける（無指定ならプレーン表示）。
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/review_wizard.ts" \
+  --questions <in.json> --out <out.json> --timeout 1800 --rich
 ```
 
 ### 3. ブラウザが自動的に開く

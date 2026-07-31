@@ -58,6 +58,7 @@ node scripts/review_wizard.ts \
 | `--timeout <秒>` | 600 | 無回答のまま経過するとタイムアウト終了（0 で無効） |
 | `--no-open` | オフ | ブラウザを自動で開かない |
 | `--port <port>` | 0（空きポート自動割当） | 待受ポートを固定したいとき |
+| `--rich` | オフ | `question.detail`（信頼 HTML）を描画する。図版・表つきの質問を出すときに付ける |
 
 ### 終了コード
 
@@ -81,7 +82,8 @@ node scripts/review_wizard.ts \
       "options": [
         { "label": "選択肢A", "description": "補足説明（省略可）" },
         { "label": "選択肢B", "description": "補足説明（省略可）" }
-      ]
+      ],
+      "detail": "リッチ説明の HTML（省略可、--rich 指定時のみ描画）"
     }
   ]
 }
@@ -90,6 +92,10 @@ node scripts/review_wizard.ts \
 - `questions` は 1 件以上、各質問の `options` は 2 件以上必須。
 - `multiSelect: true` で複数選択可、既定は単一選択（1 つまで）。
 - 各質問には「その他」自由記述欄が自動で付く（options に含める必要はない）。
+- `detail`（省略可）は **`--rich` を付けたときだけ** 質問文の下に **信頼 HTML** として描画される。
+  表（`<table>`）・図（インライン `<svg>`）・画像（`data:` URI）を埋め込める。外部 URL は使わず
+  自己完結させる（オフライン維持）。`--rich` 無指定なら描画されない（安全側の既定）。信頼できる
+  作者が書く前提で `innerHTML` するため、未検証の外部文字列は入れないこと。
 
 ## 回答 JSON のスキーマ
 
@@ -109,7 +115,8 @@ node scripts/review_wizard.ts \
 ```
 
 `answers` は質問と同じ順序・同じ件数で並ぶ。この質問/回答 JSON の形式は外部利用者
-との互換性契約であり、今後の修正でも変更しない。
+との互換性契約であり、既存フィールドの意味や回答形式は今後の修正でも変更しない
+（`detail` のような**任意フィールドの追加**は後方互換のため、この限りではない）。
 
 ## Claude Code からの使い方
 
