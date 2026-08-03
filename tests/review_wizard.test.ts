@@ -201,7 +201,7 @@ test("server flow: GET serves the wizard, wrong token 404s, invalid POST 400s, v
 });
 
 // ---------------------------------------------------------------------------
-// 3. リッチ説明 (--rich / question.detail)
+// 3. リッチ説明 (既定 rich / --no-rich / question.detail)
 // ---------------------------------------------------------------------------
 
 const DETAIL_QUESTIONS = {
@@ -216,26 +216,42 @@ const DETAIL_QUESTIONS = {
   ],
 };
 
-test("--rich embeds question.detail; without --rich the detail is stripped", async () => {
+test("by default (no flag) question.detail is embedded", async () => {
   const tmp = mkTmpDir();
   const qpath = writeQuestionsFixture(tmp, DETAIL_QUESTIONS);
 
-  // --rich あり: detail が配信 HTML(埋め込み JSON)に含まれる
-  const rich = await startReview(["--no-open", "--rich", "--questions", qpath, "--port", "0"]);
+  const rich = await startReview(["--no-open", "--questions", qpath, "--port", "0"]);
   try {
     const html = await (await fetch(rich.url)).text();
-    assert.ok(html.includes("DETAILTOKEN_XYZ"), "with --rich, detail should be embedded");
+    assert.ok(html.includes("DETAILTOKEN_XYZ"), "by default, detail should be embedded");
   } finally {
     if (rich.proc.exitCode === null && !rich.proc.killed) rich.proc.kill();
   }
+});
 
-  // --rich なし: detail は配信されない（HTML 注入自体が起きない）
-  const plain = await startReview(["--no-open", "--questions", qpath, "--port", "0"]);
+test("--no-rich strips question.detail", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, DETAIL_QUESTIONS);
+
+  const plain = await startReview(["--no-open", "--no-rich", "--questions", qpath, "--port", "0"]);
   try {
     const html = await (await fetch(plain.url)).text();
-    assert.ok(!html.includes("DETAILTOKEN_XYZ"), "without --rich, detail should be stripped");
+    assert.ok(!html.includes("DETAILTOKEN_XYZ"), "with --no-rich, detail should be stripped");
   } finally {
     if (plain.proc.exitCode === null && !plain.proc.killed) plain.proc.kill();
+  }
+});
+
+test("--rich (backward-compat no-op) still embeds question.detail", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, DETAIL_QUESTIONS);
+
+  const rich = await startReview(["--no-open", "--rich", "--questions", qpath, "--port", "0"]);
+  try {
+    const html = await (await fetch(rich.url)).text();
+    assert.ok(html.includes("DETAILTOKEN_XYZ"), "with --rich (no-op), detail should still be embedded");
+  } finally {
+    if (rich.proc.exitCode === null && !rich.proc.killed) rich.proc.kill();
   }
 });
 

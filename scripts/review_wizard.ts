@@ -42,7 +42,7 @@ interface Question {
   header?: string;
   multiSelect?: boolean;
   options: QuestionOption[];
-  detail?: string; // 任意。--rich 指定時のみ、信頼 HTML として質問文の下に描画する。
+  detail?: string; // 任意。既定で信頼 HTML として質問文の下に描画する（--no-rich で無効化）。
 }
 
 interface QuestionsDoc {
@@ -68,7 +68,7 @@ interface CliOptions {
   timeoutSec: number;
   noOpen: boolean;
   port: number;
-  rich: boolean; // true のとき question.detail を信頼 HTML として描画する。
+  rich: boolean; // true（既定）のとき question.detail を信頼 HTML として描画する。--no-rich で false。
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +334,8 @@ const CLIENT_SCRIPT = String.raw`(function () {
     var html = "";
     if (q.header) html += '<div class="rv-header-chip">' + esc(q.header) + "</div>";
     html += '<div class="rv-question">' + esc(q.question) + "</div>";
-    // detail は --rich 指定時のみサーバがデータに含める。信頼 HTML として非エスケープで挿入する。
+    // detail は rich（既定 true、--no-rich で false）のときのみサーバがデータに含める。
+    // 信頼 HTML として非エスケープで挿入する。
     if (q.detail) html += '<div class="rv-detail">' + q.detail + "</div>";
     var inputType = q.multiSelect ? "checkbox" : "radio";
     q.options.forEach(function (opt, i) {
@@ -470,7 +471,7 @@ const CLIENT_SCRIPT = String.raw`(function () {
  * req_status.ts の explorerDataJson と同じ流儀（`<` を < にして </script> 混入を防ぐ）。
  */
 function reviewDataJson(doc: QuestionsDoc, postUrl: string, rich: boolean): string {
-  // --rich が無ければ detail をクライアントへ渡さない（HTML 注入自体を起こさない）。
+  // rich=false（--no-rich 指定時）は detail をクライアントへ渡さない（HTML 注入自体を起こさない）。
   const questions = rich
     ? doc.questions
     : doc.questions.map((q) => {
@@ -701,7 +702,10 @@ async function main(): Promise<number> {
       timeout: { type: "string", default: "600" },
       "no-open": { type: "boolean", default: false },
       port: { type: "string", default: "0" },
+      // rich 描画は既定で有効。--no-rich で無効化する。--rich は後方互換のため
+      // 受け付け続けるが no-op（既定と同じ挙動になるだけでエラーにはしない）。
       rich: { type: "boolean", default: false },
+      "no-rich": { type: "boolean", default: false },
     },
   });
 
@@ -753,7 +757,8 @@ async function main(): Promise<number> {
     timeoutSec,
     noOpen: Boolean(values["no-open"]),
     port,
-    rich: Boolean(values.rich),
+    // 既定で描画（true）。--no-rich が付いていれば無効化する。--rich は後方互換の no-op。
+    rich: !Boolean(values["no-rich"]),
   };
 
   return runWizardServer(doc, opts);
