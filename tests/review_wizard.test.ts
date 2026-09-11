@@ -9,6 +9,8 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 
+import { openCommands } from "../scripts/review_wizard.ts";
+
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const REVIEW_SCRIPT = path.join(REPO_ROOT, "scripts", "review_wizard.ts");
 
@@ -277,4 +279,38 @@ test("exits 2 on timeout when no answer is submitted", async () => {
   const exitCode = await waitForExit(proc);
   assert.equal(exitCode, 2);
   assert.ok(!fs.existsSync(outPath), "no answer file should be written on timeout");
+});
+
+// ---------------------------------------------------------------------------
+// 5. ブラウザ起動コマンド（実際には起動せず、組み立てだけを検証する）
+// ---------------------------------------------------------------------------
+
+const TEST_URL = "http://127.0.0.1:54321/t/deadbeef/";
+
+test("win32 opens with PowerShell Start-Process and passes the URL via env", () => {
+  const [first, fallback] = openCommands(TEST_URL, "win32");
+  assert.equal(first?.cmd, "powershell.exe");
+  assert.deepEqual(first?.args, [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    "Start-Process $env:REVIEW_WIZARD_URL",
+  ]);
+  // URL はコマンドライン上のクォート解釈を避けて環境変数で渡す。
+  assert.equal(first?.env?.REVIEW_WIZARD_URL, TEST_URL);
+  assert.ok(!first?.args.some((a) => a.includes(TEST_URL)), "URL must not be inlined into args");
+  // powershell.exe が無い環境の保険。
+  assert.deepEqual(fallback?.args, ["/c", "start", "", TEST_URL]);
+  assert.ok(!openCommands(TEST_URL, "win32").some((c) => c.cmd === "xdg-open"));
+});
+
+test("win32 candidates are spawned non-detached (detached breaks ShellExecute)", () => {
+  for (const candidate of openCommands(TEST_URL, "win32")) {
+    assert.equal(candidate.detached, false, `${candidate.cmd} must not be detached on Windows`);
+  }
+});
+
+test("darwin opens with open(1) and linux with xdg-open", () => {
+  assert.deepEqual(openCommands(TEST_URL, "darwin"), [{ cmd: "open", args: [TEST_URL] }]);
+  assert.deepEqual(openCommands(TEST_URL, "linux"), [{ cmd: "xdg-open", args: [TEST_URL] }]);
 });

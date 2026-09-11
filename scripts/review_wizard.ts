@@ -523,22 +523,75 @@ function completionHtml(): string {
 // ---------------------------------------------------------------------------
 // ブラウザ起動（失敗してもサーバは続行）
 // ---------------------------------------------------------------------------
-function tryOpenBrowser(url: string): void {
-  const cmd = process.platform === "darwin" ? "open" : "xdg-open";
-  try {
-    const child = spawn(cmd, [url], { detached: true, stdio: "ignore" });
-    child.on("error", (err) => {
-      console.error(
-        `review_wizard: ブラウザの自動起動に失敗しました。手動で開いてください: ${url}（${err.message}）`,
-      );
-    });
-    child.unref();
-  } catch (e) {
-    console.error(
-      `review_wizard: ブラウザの自動起動に失敗しました。手動で開いてください: ${url}（${e instanceof Error ? e.message : String(e)}）`,
-    );
+type OpenCommand = {
+  cmd: string;
+  args: string[];
+  env?: NodeJS.ProcessEnv;
+  /** 既定は true（親と切り離す）。Windows では false にしないとブラウザが開かない。 */
+  detached?: boolean;
+};
+
+/**
+ * プラットフォームごとのブラウザ起動コマンドを、試す順に返す。
+ *
+ * Windows には xdg-open が無く、そのままでは自動起動に失敗するため、最初から
+ * PowerShell の Start-Process で開く。あわせて Windows 固有の注意が2点ある。
+ *
+ * - URL はコマンドラインのクォート解釈を挟まないよう、環境変数
+ *   REVIEW_WIZARD_URL 経由で渡す（`&` や空白を含む URL でも壊れない）。
+ * - `detached: true` で spawn すると、PowerShell 自体は終了コード 0 で終わるのに
+ *   ShellExecute が実際にはブラウザを開かない（実測）。そのため Windows の候補は
+ *   `detached: false` で起動する。ブラウザは PowerShell 終了後も残る。
+ *
+ * powershell.exe が使えない環境の保険として cmd /c start を後ろに置く
+ * （`start` の第1引数 "" はウィンドウタイトルで、省略すると URL がタイトル扱いになる）。
+ */
+function openCommands(url: string, platform: NodeJS.Platform = process.platform): OpenCommand[] {
+  if (platform === "win32") {
+    return [
+      {
+        cmd: "powershell.exe",
+        args: ["-NoProfile", "-NonInteractive", "-Command", "Start-Process $env:REVIEW_WIZARD_URL"],
+        env: { ...process.env, REVIEW_WIZARD_URL: url },
+        detached: false,
+      },
+      { cmd: process.env.COMSPEC ?? "cmd.exe", args: ["/c", "start", "", url], detached: false },
+    ];
   }
+  if (platform === "darwin") return [{ cmd: "open", args: [url] }];
+  return [{ cmd: "xdg-open", args: [url] }];
 }
+
+function tryOpenBrowser(url: string): void {
+  const candidates = openCommands(url);
+  const attempt = (index: number, lastError: string): void => {
+    const candidate = candidates[index];
+    if (!candidate) {
+      console.error(
+        `review_wizard: ブラウザの自動起動に失敗しました。手動で開いてください: ${url}（${lastError}）`,
+      );
+      return;
+    }
+    try {
+      const child = spawn(candidate.cmd, candidate.args, {
+        detached: candidate.detached ?? true,
+        stdio: "ignore",
+        windowsHide: true,
+        env: candidate.env ?? process.env,
+      });
+      // detached でない候補でも unref しておけば、この子プロセスの待ちで
+      // サーバ側のイベントループが延びることはない。
+      // 起動できなかったとき（ENOENT 等）は次の候補にフォールバックする。
+      child.on("error", (err) => attempt(index + 1, err.message));
+      child.unref();
+    } catch (e) {
+      attempt(index + 1, e instanceof Error ? e.message : String(e));
+    }
+  };
+  attempt(0, "起動コマンドがありません");
+}
+
+export { openCommands };
 
 // ---------------------------------------------------------------------------
 // 出力
