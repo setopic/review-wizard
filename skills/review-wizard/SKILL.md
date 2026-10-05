@@ -120,4 +120,4 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/review_wizard.ts" \
 - **書式**: `detail` は JSON 文字列なので改行を含めず 1 行に畳む。信頼できる自作 HTML のみを
   入れ、未検証の外部文字列を混ぜない。
 
-参考実装として `examples/rich-demo.json` の1問目がこのスタイルの見本である。
+参考実装として `${CLAUDE_PLUGIN_ROOT}/examples/rich-demo.json` の1問目がこのスタイルの見本である。
