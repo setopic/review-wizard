@@ -78,7 +78,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/review_wizard.ts" \
 |---|---|
 | 0 | 回答受領（`--out` のパスに回答 JSON が書かれる） |
 | 1 | 入力エラー（質問 JSON 不正など） |
-| 2 | タイムアウト（`--timeout` 秒、無回答） |
+| 2 | タイムアウト（`--timeout` 秒、無回答）、またはサーバの起動失敗。どちらかは標準エラーの内容で見分ける |
 | 130 | SIGINT による中断 |
 
 回答 JSON のスキーマ:
