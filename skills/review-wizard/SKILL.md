@@ -1,6 +1,6 @@
 ---
 name: review-wizard
-description: ユーザーへの選択式の質問が3問以上あるとき、または選択肢の比較検討が要るときに、AskUserQuestion の代わりに使うツール。ブラウザのウィザードUIでステッパー（現在位置表示）つきの複数質問（選択肢・複数選択・自由記述）を提示し、回答結果をJSONで受け取る。図版・表つきのリッチな説明（question.detail）は既定で描画される。1〜2問の即答やブラウザ（GUI）が使えない環境では AskUserQuestion を使う。
+description: ユーザーへの選択式の質問が3問以上あるとき、または選択肢の比較検討が要るときに、AskUserQuestion の代わりに使うツール。ブラウザのウィザードUIでステッパー（現在位置表示）つきの複数質問（選択肢・複数選択・自由記述）を提示し、回答結果をJSONで受け取る。質問ごとに図版や表で説明（question.detail）を添えられる。1〜2問の即答やブラウザ（GUI）が使えない環境では AskUserQuestion を使う。
 ---
 
 # review-wizard — ブラウザ・ウィザードでの複数質問
@@ -61,9 +61,6 @@ AskUserQuestion のブラウザ版。複数の質問（選択肢・複数選択�
 node "${CLAUDE_PLUGIN_ROOT}/scripts/review_wizard.ts" \
   --questions <in.json> --out <out.json> --timeout 1800
 ```
-
-質問に `detail` を含めていれば、上記のまま既定で図版・表つきの説明が描画される。
-プレーン表示にしたいときだけ `--no-rich` を付ける。
 
 ### 3. ブラウザが自動的に開く
 
