@@ -1,6 +1,6 @@
 {
   "name": "review-wizard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "複数の質問をブラウザのウィザードUIで提示し回答JSONを取得するツール（AskUserQuestionのブラウザ版）。",
   "author": {
     "name": "Junji UEHARA"
