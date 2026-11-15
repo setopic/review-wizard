@@ -9,7 +9,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 
-import { openCommands } from "../scripts/review_wizard.ts";
+import { openCommands, wizardUrls, isLoopbackHost } from "../scripts/review_wizard.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const REVIEW_SCRIPT = path.join(REPO_ROOT, "scripts", "review_wizard.ts");
@@ -313,4 +313,129 @@ test("win32 candidates are spawned non-detached (detached breaks ShellExecute)",
 test("darwin opens with open(1) and linux with xdg-open", () => {
   assert.deepEqual(openCommands(TEST_URL, "darwin"), [{ cmd: "open", args: [TEST_URL] }]);
   assert.deepEqual(openCommands(TEST_URL, "linux"), [{ cmd: "xdg-open", args: [TEST_URL] }]);
+});
+
+// ---------------------------------------------------------------------------
+// 6. 待ち受けのアドレス（--host）と LAN に開くときの守り
+// ---------------------------------------------------------------------------
+
+const FAKE_IFACES = {
+  lo: [{ address: "127.0.0.1", netmask: "255.0.0.0", family: "IPv4", mac: "00:00:00:00:00:00", internal: true, cidr: "127.0.0.1/8" }],
+  wifi: [
+    { address: "192.168.1.23", netmask: "255.255.255.0", family: "IPv4", mac: "aa:bb:cc:dd:ee:ff", internal: false, cidr: "192.168.1.23/24" },
+    { address: "fe80::1", netmask: "ffff:ffff:ffff:ffff::", family: "IPv6", mac: "aa:bb:cc:dd:ee:ff", internal: false, cidr: "fe80::1/64", scopeid: 1 },
+  ],
+  apipa: [{ address: "169.254.10.20", netmask: "255.255.0.0", family: "IPv4", mac: "11:22:33:44:55:66", internal: false, cidr: "169.254.10.20/16" }],
+} as unknown as NodeJS.Dict<os.NetworkInterfaceInfo[]>;
+
+test("wizardUrls: 0.0.0.0 opens locally on 127.0.0.1 and lists LAN IPv4 URLs with the same token", () => {
+  const { local, lan } = wizardUrls("0.0.0.0", 5000, "abc", FAKE_IFACES);
+  assert.equal(local, "http://127.0.0.1:5000/t/abc/");
+  assert.deepEqual(lan, ["http://192.168.1.23:5000/t/abc/"]);
+});
+
+test("wizardUrls: a specific host is used as-is and lists no extra LAN URLs", () => {
+  assert.deepEqual(wizardUrls("127.0.0.1", 5000, "abc", FAKE_IFACES), { local: "http://127.0.0.1:5000/t/abc/", lan: [] });
+  assert.deepEqual(wizardUrls("192.168.1.23", 5000, "abc", FAKE_IFACES), { local: "http://192.168.1.23:5000/t/abc/", lan: [] });
+  assert.equal(wizardUrls("::1", 5000, "abc", FAKE_IFACES).local, "http://[::1]:5000/t/abc/");
+});
+
+test("isLoopbackHost tells loopback from LAN addresses", () => {
+  assert.ok(isLoopbackHost("127.0.0.1"));
+  assert.ok(isLoopbackHost("localhost"));
+  assert.ok(isLoopbackHost("::1"));
+  assert.ok(!isLoopbackHost("0.0.0.0"));
+  assert.ok(!isLoopbackHost("192.168.1.23"));
+});
+
+test("exits 1 when --host is empty", () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, VALID_QUESTIONS);
+  const proc = spawnSync(process.execPath, [REVIEW_SCRIPT, "--no-open", "--questions", qpath, "--host", ""], {
+    encoding: "utf-8",
+  });
+  assert.equal(proc.status, 1);
+  assert.match(proc.stderr, /--host/);
+});
+
+const GOOD_ANSWERS = {
+  answers: [
+    { selected: ["採用する"], other: null },
+    { selected: ["特になし"], other: null },
+  ],
+};
+
+function answersUrlOf(url: string): URL {
+  const u = new URL(url);
+  u.pathname = u.pathname.replace(/\/$/, "") + "/answers";
+  return u;
+}
+
+test("responses carry no-store and no-referrer headers so the token does not leak", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, VALID_QUESTIONS);
+  const { proc, url } = await startReview(["--no-open", "--questions", qpath, "--host", "127.0.0.1"]);
+  try {
+    assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/t\/[0-9a-f]{32}\/$/);
+    const res = await fetch(url);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.equal(res.headers.get("referrer-policy"), "no-referrer");
+  } finally {
+    if (proc.exitCode === null && !proc.killed) proc.kill();
+  }
+});
+
+test("an oversized answer body is refused with 413", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, VALID_QUESTIONS);
+  const outPath = path.join(tmp, "answers.json");
+  const { proc, url } = await startReview(["--no-open", "--questions", qpath, "--out", outPath]);
+  try {
+    const res = await fetch(answersUrlOf(url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "x".repeat(2 * 1024 * 1024),
+    }).catch((e: unknown) => e);
+    // 本文を送り切る前に切られると fetch が失敗することもある。どちらでも受け付けていなければよい。
+    if (res instanceof Response) assert.equal(res.status, 413);
+    assert.ok(!fs.existsSync(outPath), "no answer file should be written");
+    assert.equal(proc.exitCode, null, "server should keep waiting for a real answer");
+  } finally {
+    if (proc.exitCode === null && !proc.killed) proc.kill();
+  }
+});
+
+test("only one answer is accepted even when two are sent at once", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, VALID_QUESTIONS);
+  const outPath = path.join(tmp, "answers.json");
+  const { proc, url } = await startReview(["--no-open", "--questions", qpath, "--out", outPath]);
+  try {
+    const second = {
+      answers: [
+        { selected: ["採用しない"], other: null },
+        { selected: ["テストも欲しい"], other: null },
+      ],
+    };
+    const post = (body: unknown) =>
+      fetch(answersUrlOf(url), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const results = await Promise.allSettled([post(GOOD_ANSWERS), post(second)]);
+    const ok = results.filter((r) => r.status === "fulfilled" && r.value.status === 200);
+    assert.equal(ok.length, 1, "exactly one submission should be accepted");
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.status !== 200) assert.equal(r.value.status, 409);
+    }
+    assert.equal(await waitForExit(proc), 0);
+    const written = JSON.parse(fs.readFileSync(outPath, "utf-8"));
+    const acceptedIndex = results.indexOf(ok[0]);
+    const expected = acceptedIndex === 0 ? GOOD_ANSWERS : second;
+    assert.deepEqual(written.answers[0].selected, expected.answers[0].selected);
+  } finally {
+    if (proc.exitCode === null && !proc.killed) proc.kill();
+  }
 });

@@ -11,7 +11,8 @@
  * - 回答前の見直し（戻る）と送信前の確認（全回答のサマリ）ができる。
  * - 回答は機械可読 JSON（--out 指定時はファイル、未指定時は標準出力）で返る。
  *
- * 実現方式: 一時ローカル HTTP サーバ（127.0.0.1、URL にワンタイムトークン）を
+ * 実現方式: 一時ローカル HTTP サーバ（既定 127.0.0.1、--host で LAN にも開ける。
+ * URL にワンタイムトークン）を
  * Node 標準の http のみで起動し、回答が送信された時点で回答 JSON を書き出して
  * サーバを閉じる。常駐はしない。外部 npm 依存は追加しない（node:http, node:crypto,
  * node:fs, node:util, node:child_process のみ）。
@@ -26,6 +27,7 @@ import * as path from "node:path";
 import { parseArgs } from "node:util";
 import * as http from "node:http";
 import * as crypto from "node:crypto";
+import * as os from "node:os";
 import { spawn } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -68,6 +70,7 @@ interface CliOptions {
   timeoutSec: number;
   noOpen: boolean;
   port: number;
+  host: string; // 待ち受けるアドレス。既定 127.0.0.1。LAN から開くときは 0.0.0.0 など。
   rich: boolean; // true（既定）のとき question.detail を信頼 HTML として描画する。--no-rich で false。
 }
 
@@ -608,8 +611,74 @@ function writeOutput(doc: AnswersDoc, outPath: string | undefined): void {
 }
 
 // ---------------------------------------------------------------------------
+// 待ち受けのアドレスと表示する URL
+// ---------------------------------------------------------------------------
+
+/** 全部のアドレスで待ち受ける指定か（LAN から開ける）。 */
+function isWildcardHost(host: string): boolean {
+  return host === "0.0.0.0" || host === "::";
+}
+
+/** この機械の中からしか届かないアドレスか。 */
+function isLoopbackHost(host: string): boolean {
+  return host === "localhost" || host === "::1" || /^127\./.test(host);
+}
+
+/** URL に入れるホストの書き方（IPv6 は角括弧で囲む）。 */
+function urlHost(host: string): string {
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+/**
+ * 表示する URL を組み立てる。
+ * - local: この機械のブラウザで開く URL（自動で開くのもこれ）。
+ * - lan: 同じ LAN の別の端末から開く URL（ワイルドカードで待ち受けるときだけ）。
+ * どちらにも同じワンタイムトークンが入る。
+ */
+function wizardUrls(
+  host: string,
+  port: number,
+  token: string,
+  interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces(),
+): { local: string; lan: string[] } {
+  const pathPart = `/t/${token}/`;
+  if (!isWildcardHost(host)) {
+    return { local: `http://${urlHost(host)}:${port}${pathPart}`, lan: [] };
+  }
+  const lan: string[] = [];
+  for (const infos of Object.values(interfaces)) {
+    for (const info of infos ?? []) {
+      // Node 18.0〜18.3 では family が数値（4）のことがある。
+      const isV4 = info.family === "IPv4" || (info.family as unknown) === 4;
+      if (!isV4 || info.internal) continue;
+      if (info.address.startsWith("169.254.")) continue; // リンクローカル（DHCP 失敗時など）は除く
+      const url = `http://${info.address}:${port}${pathPart}`;
+      if (!lan.includes(url)) lan.push(url);
+    }
+  }
+  return { local: `http://127.0.0.1:${port}${pathPart}`, lan };
+}
+
+export { wizardUrls, isLoopbackHost };
+
+// ---------------------------------------------------------------------------
 // サーバ本体
 // ---------------------------------------------------------------------------
+
+/** 回答の POST で受け付ける本文の上限（バイト）。LAN に開くときの大きな送りつけを防ぐ。 */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * どの応答にも付けるヘッダ。
+ * - no-store: ワンタイムトークン入りのページや回答を、端末のキャッシュに残さない。
+ * - no-referrer: detail に外へのリンクがあっても、URL のトークンを Referer で渡さない。
+ */
+const SECURITY_HEADERS = {
+  "Cache-Control": "no-store",
+  "Referrer-Policy": "no-referrer",
+  "X-Content-Type-Options": "nosniff",
+};
+
 function requestListener(
   doc: QuestionsDoc,
   token: string,
@@ -619,34 +688,62 @@ function requestListener(
   const wizardPath = `/t/${token}/`;
   const wizardPathNoSlash = `/t/${token}`;
   const answersPath = `/t/${token}/answers`;
+  // 回答を受け取ったら true にし、そのあとの送信は 409 で断る（受け付けは1回だけ）。
+  // サーバを閉じるまでの間に別の端末から届いた送信で、回答が書き換わらないようにする。
+  let accepted = false;
 
   return (req, res) => {
     let pathname: string;
     try {
       pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
     } catch {
-      res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8", Connection: "close" });
+      res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
       res.end("Bad Request");
       return;
     }
 
     if (req.method === "GET" && (pathname === wizardPath || pathname === wizardPathNoSlash)) {
       const html = buildWizardHtml(doc, answersPath, opts.rich);
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", Connection: "close" });
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
       res.end(html);
       return;
     }
 
     if (req.method === "POST" && pathname === answersPath) {
+      if (accepted) {
+        res.writeHead(409, { "Content-Type": "application/json; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
+        res.end(JSON.stringify({ error: "回答はすでに受け付けました。" }));
+        return;
+      }
       const chunks: Buffer[] = [];
-      req.on("data", (c: Buffer) => chunks.push(c));
+      let size = 0;
+      let tooLarge = false;
+      req.on("data", (c: Buffer) => {
+        if (tooLarge) return;
+        size += c.length;
+        if (size > MAX_BODY_BYTES) {
+          tooLarge = true;
+          chunks.length = 0;
+          res.on("finish", () => req.destroy()); // 残りの本文は読まずに切る
+          res.writeHead(413, { "Content-Type": "application/json; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
+          res.end(JSON.stringify({ error: `回答データが大きすぎます（上限 ${MAX_BODY_BYTES} バイト）。` }));
+          return;
+        }
+        chunks.push(c);
+      });
       req.on("end", () => {
+        if (tooLarge) return;
+        if (accepted) {
+          res.writeHead(409, { "Content-Type": "application/json; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
+          res.end(JSON.stringify({ error: "回答はすでに受け付けました。" }));
+          return;
+        }
         let bodyRaw: unknown;
         try {
           const text = Buffer.concat(chunks).toString("utf-8");
           bodyRaw = text === "" ? {} : JSON.parse(text);
         } catch (e) {
-          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", Connection: "close" });
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
           res.end(JSON.stringify({ error: `回答データの JSON 解析に失敗しました: ${e instanceof Error ? e.message : String(e)}` }));
           return;
         }
@@ -655,7 +752,7 @@ function requestListener(
         try {
           validated = validateAnswersPayload(bodyRaw, doc);
         } catch (e) {
-          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", Connection: "close" });
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
           res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
           return;
         }
@@ -671,22 +768,24 @@ function requestListener(
           })),
         };
 
+        accepted = true;
         try {
           writeOutput(resultDoc, opts.outPath);
         } catch (e) {
-          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8", Connection: "close" });
+          accepted = false; // 書き出せなかったときは、送り直しを受け付ける
+          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
           res.end(JSON.stringify({ error: `回答の出力に失敗しました: ${e instanceof Error ? e.message : String(e)}` }));
           return;
         }
 
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", Connection: "close" });
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
         res.end(completionHtml());
         finish(0);
       });
       return;
     }
 
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", Connection: "close" });
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", Connection: "close", ...SECURITY_HEADERS });
     res.end("Not Found");
   };
 }
@@ -721,12 +820,25 @@ function runWizardServer(doc: QuestionsDoc, opts: CliOptions): Promise<number> {
 
     process.on("SIGINT", onSigint);
 
-    server.listen(opts.port, "127.0.0.1", () => {
+    server.listen(opts.port, opts.host, () => {
       const addr = server.address();
       const actualPort = addr && typeof addr === "object" ? addr.port : opts.port;
-      const url = `http://127.0.0.1:${actualPort}/t/${token}/`;
-      // テストがこの行から URL を取る。必ず1行だけ標準出力に印字する。
+      const { local: url, lan } = wizardUrls(opts.host, actualPort, token);
+      // テストや呼び出し側がこの行から URL を取る。"review_wizard: " の行は必ず1行だけ印字する。
       console.log(`review_wizard: ${url}`);
+      // LAN の URL は接頭辞を変えて、上の1行と見分けられるようにする。
+      for (const lanUrl of lan) console.log(`review_wizard(LAN): ${lanUrl}`);
+      if (!isLoopbackHost(opts.host)) {
+        if (isWildcardHost(opts.host) && lan.length === 0) {
+          console.error("review_wizard: LAN の IPv4 アドレスが見つかりません。この機械の IP アドレスを調べて URL のホスト部を置き換えてください。");
+        }
+        console.error(
+          "review_wizard: 注意: 同じネットワークの端末から URL を知っていれば開けます（通信は暗号化されません）。URL は回答する人にだけ伝えてください。",
+        );
+        if (opts.timeoutSec === 0) {
+          console.error("review_wizard: 注意: --timeout 0 のため、回答されるまで LAN に開いたままになります。");
+        }
+      }
 
       if (!opts.noOpen) tryOpenBrowser(url);
 
@@ -755,6 +867,7 @@ async function main(): Promise<number> {
       timeout: { type: "string", default: "600" },
       "no-open": { type: "boolean", default: false },
       port: { type: "string", default: "0" },
+      host: { type: "string", default: "127.0.0.1" },
       // rich 描画は既定で有効。--no-rich で無効化する。--rich は後方互換のため
       // 受け付け続けるが no-op（既定と同じ挙動になるだけでエラーにはしない）。
       rich: { type: "boolean", default: false },
@@ -805,11 +918,18 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  const host = (values.host ?? "127.0.0.1").trim();
+  if (host === "") {
+    console.error("review_wizard: --host にアドレスを指定してください（例: 127.0.0.1、0.0.0.0）。");
+    return 1;
+  }
+
   const opts: CliOptions = {
     outPath: values.out,
     timeoutSec,
     noOpen: Boolean(values["no-open"]),
     port,
+    host,
     // 既定で描画（true）。--no-rich が付いていれば無効化する。--rich は後方互換の no-op。
     rich: !Boolean(values["no-rich"]),
   };
