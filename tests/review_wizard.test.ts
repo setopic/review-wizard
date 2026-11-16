@@ -316,6 +316,73 @@ test("exits 1 with Japanese stderr when options[].preview is not a string", () =
 });
 
 // ---------------------------------------------------------------------------
+// 3c. おすすめの印 (options[].recommended)
+// ---------------------------------------------------------------------------
+
+const RECOMMENDED_QUESTIONS = {
+  title: "推奨テスト",
+  questions: [
+    {
+      question: "どちらにしますか？",
+      options: [{ label: "案A", recommended: true }, { label: "案B" }],
+    },
+  ],
+};
+
+for (const flags of [[], ["--no-rich"]]) {
+  test(`options[].recommended reaches the page and the badge is rendered (${flags.join(" ") || "default"})`, async () => {
+    const tmp = mkTmpDir();
+    const qpath = writeQuestionsFixture(tmp, RECOMMENDED_QUESTIONS);
+    const r = await startReview(["--no-open", ...flags, "--questions", qpath, "--port", "0"]);
+    try {
+      const html = await (await fetch(r.url)).text();
+      assert.ok(html.includes('"recommended":true'), "recommended should be passed to the client");
+      assert.ok(html.includes("rv-badge"), "badge markup/style should be present");
+      assert.ok(html.includes("推奨"), "badge text should be present");
+    } finally {
+      if (r.proc.exitCode === null && !r.proc.killed) r.proc.kill();
+    }
+  });
+}
+
+test("recommended does not change the answer JSON", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, RECOMMENDED_QUESTIONS);
+  const outPath = path.join(tmp, "out.json");
+  const r = await startReview(["--no-open", "--questions", qpath, "--out", outPath, "--port", "0"]);
+  try {
+    const res = await fetch(answersUrlOf(r.url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: [{ selected: ["案A"], other: null }] }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(await waitForExit(r.proc), 0);
+    const written = JSON.parse(fs.readFileSync(outPath, "utf-8"));
+    assert.deepEqual(Object.keys(written.answers[0]).sort(), ["header", "other", "question", "selected"]);
+    assert.deepEqual(written.answers[0].selected, ["案A"]);
+  } finally {
+    if (r.proc.exitCode === null && !r.proc.killed) r.proc.kill();
+  }
+});
+
+test("exits 1 with Japanese stderr when options[].recommended is not a boolean", () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, {
+    title: "t",
+    questions: [{ question: "q", options: [{ label: "a", recommended: "yes" }, { label: "b" }] }],
+  });
+  const proc = spawnSync(
+    process.execPath,
+    [REVIEW_SCRIPT, "--no-open", "--questions", qpath, "--out", path.join(tmp, "out.json")],
+    { encoding: "utf-8" },
+  );
+  assert.equal(proc.status, 1);
+  assert.match(proc.stderr, /recommended/);
+  assert.ok(/[぀-ヿ一-鿿]/.test(proc.stderr), "stderr should contain Japanese message");
+});
+
+// ---------------------------------------------------------------------------
 // 4. タイムアウト
 // ---------------------------------------------------------------------------
 
