@@ -197,6 +197,7 @@ test("server flow: GET serves the wizard, wrong token 404s, invalid POST 400s, v
     assert.equal(written.answers[1].other, "移行手順も見てほしい");
     assert.equal(written.answers[0].question, "この設計を採用しますか？");
     assert.equal(written.answers[1].header, "確認事項");
+    assert.ok(!("questionBack" in written.answers[0]));
   } finally {
     if (proc.exitCode === null && !proc.killed) proc.kill();
   }
@@ -541,6 +542,7 @@ test("responses carry no-store and no-referrer headers so the token does not lea
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("cache-control"), "no-store");
     assert.equal(res.headers.get("referrer-policy"), "no-referrer");
+    await res.text(); // 本文を読み切る（読まずに終えると、終了後に undici が例外を出すことがある）
   } finally {
     if (proc.exitCode === null && !proc.killed) proc.kill();
   }
@@ -595,6 +597,41 @@ test("only one answer is accepted even when two are sent at once", async () => {
     const acceptedIndex = results.indexOf(ok[0]);
     const expected = acceptedIndex === 0 ? GOOD_ANSWERS : second;
     assert.deepEqual(written.answers[0].selected, expected.answers[0].selected);
+  } finally {
+    if (proc.exitCode === null && !proc.killed) proc.kill();
+  }
+});
+
+test("questionBack: 書かれた質問だけ項目が入り、聞き返しだけでも送信できる", async () => {
+  const tmp = mkTmpDir();
+  const qPath = writeQuestionsFixture(tmp, {
+    title: "聞き返し",
+    questions: [
+      { question: "Q1", header: "H1", options: [{ label: "A" }, { label: "B" }] },
+      { question: "Q2", header: "H2", options: [{ label: "C" }, { label: "D" }] },
+    ],
+  });
+  const outPath = path.join(tmp, "answers.json");
+  const { proc, url } = await startReview(["--no-open", "--questions", qPath, "--out", outPath, "--port", "0"]);
+  try {
+    const answersUrl = new URL(url);
+    answersUrl.pathname = answersUrl.pathname.replace(/\/$/, "") + "/answers";
+    const res = await fetch(answersUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        answers: [
+          { selected: ["A"], other: null, questionBack: "   " },
+          { selected: [], other: null, questionBack: "  Dの意味は？ " },
+        ],
+      }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(await waitForExit(proc), 0);
+    const written = JSON.parse(fs.readFileSync(outPath, "utf-8"));
+    assert.ok(!("questionBack" in written.answers[0]));
+    assert.equal(written.answers[1].questionBack, "Dの意味は？");
+    assert.deepEqual(written.answers[1].selected, []);
   } finally {
     if (proc.exitCode === null && !proc.killed) proc.kill();
   }

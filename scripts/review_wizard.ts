@@ -59,6 +59,7 @@ interface AnswerOut {
   header: string;
   selected: string[];
   other: string | null;
+  questionBack?: string;
 }
 
 interface AnswersDoc {
@@ -177,7 +178,7 @@ function validateQuestionsDoc(raw: unknown): QuestionsDoc {
 function validateAnswersPayload(
   raw: unknown,
   doc: QuestionsDoc,
-): Array<{ selected: string[]; other: string | null }> {
+): Array<{ selected: string[]; other: string | null; questionBack: string | null }> {
   if (!isRecord(raw)) {
     throw new Error("回答データはオブジェクトである必要があります。");
   }
@@ -216,10 +217,16 @@ function validateAnswersPayload(
     const otherRaw = aRaw["other"];
     const other = typeof otherRaw === "string" && otherRaw.trim() !== "" ? otherRaw : null;
 
-    if (selected.length === 0 && other === null) {
-      throw new Error(`answers[${i}]（質問「${q.question}」）が未回答です。選択肢またはその他の記入が必要です。`);
+    const qbRaw = aRaw["questionBack"];
+    if (qbRaw !== undefined && qbRaw !== null && typeof qbRaw !== "string") {
+      throw new Error(`answers[${i}].questionBack は文字列である必要があります。`);
     }
-    return { selected, other };
+    const questionBack = typeof qbRaw === "string" && qbRaw.trim() !== "" ? qbRaw.trim() : null;
+
+    if (selected.length === 0 && other === null && questionBack === null) {
+      throw new Error(`answers[${i}]（質問「${q.question}」）が未回答です。選択肢・その他・聞き返しのいずれかの記入が必要です。`);
+    }
+    return { selected, other, questionBack };
   });
 }
 
@@ -290,6 +297,10 @@ h1 { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 1.35rem
 .rv-other label { display: block; font-size: .85rem; color: var(--rv-ink-soft); margin-bottom: .4rem; }
 .rv-other input { width: 100%; box-sizing: border-box; padding: .6rem .7rem; border: 1px solid var(--rv-card-border); border-radius: 6px; font: inherit; background: var(--rv-card); color: var(--rv-ink); }
 .rv-other input:focus { outline: none; border-color: var(--rv-accent); box-shadow: 0 0 0 3px var(--rv-accent-soft); }
+.rv-qback { margin-top: .9rem; }
+.rv-qback label { display: block; font-size: .85rem; color: var(--rv-ink-soft); margin-bottom: .4rem; }
+.rv-qback input { width: 100%; box-sizing: border-box; padding: .6rem .7rem; border: 1px solid var(--rv-card-border); border-radius: 6px; font: inherit; background: var(--rv-card); color: var(--rv-ink); }
+.rv-qback input:focus { outline: none; border-color: var(--rv-accent); box-shadow: 0 0 0 3px var(--rv-accent-soft); }
 .rv-nav { display: flex; justify-content: space-between; gap: .8rem; }
 .rv-nav button { font: inherit; padding: .65rem 1.4rem; border-radius: 6px; border: 1px solid var(--rv-accent); background: var(--rv-accent); color: #fff; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
 .rv-nav button:hover:not(:disabled) { background: var(--rv-accent-strong); border-color: var(--rv-accent-strong); }
@@ -311,7 +322,7 @@ const CLIENT_SCRIPT = String.raw`(function () {
   var data = JSON.parse(dataEl.textContent);
   var questions = data.questions, postUrl = data.postUrl, title = data.title;
 
-  var state = questions.map(function () { return { selected: [], other: "" }; });
+  var state = questions.map(function () { return { selected: [], other: "", questionBack: "" }; });
   var step = 0; // 0..questions.length-1 = 各質問、questions.length = 確認画面
   var totalSteps = questions.length + 1;
 
@@ -329,7 +340,7 @@ const CLIENT_SCRIPT = String.raw`(function () {
 
   function answered(i) {
     var s = state[i];
-    return s.selected.length > 0 || s.other.trim() !== "";
+    return s.selected.length > 0 || s.other.trim() !== "" || s.questionBack.trim() !== "";
   }
 
   function renderStepper() {
@@ -384,7 +395,9 @@ const CLIENT_SCRIPT = String.raw`(function () {
       html += "</label>";
     });
     html += '<div class="rv-other"><label>その他（自由記述）</label>' +
-      '<input type="text" id="rv-other-input" value="' + esc(s.other) + '"></div></div>';
+      '<input type="text" id="rv-other-input" value="' + esc(s.other) + '"></div>' +
+      '<div class="rv-qback"><label>この質問について聞き返す（任意）</label>' +
+      '<input type="text" id="rv-qback-input" value="' + esc(s.questionBack) + '"></div></div>';
     cardEl.innerHTML = html;
 
     Array.prototype.forEach.call(cardEl.querySelectorAll(".rv-option"), function (optLabelEl) {
@@ -407,6 +420,11 @@ const CLIENT_SCRIPT = String.raw`(function () {
       s.other = otherInput.value;
       updateNav();
     });
+    var qbInput = document.getElementById("rv-qback-input");
+    qbInput.addEventListener("input", function () {
+      s.questionBack = qbInput.value;
+      updateNav();
+    });
   }
 
   function renderSummary() {
@@ -417,6 +435,7 @@ const CLIENT_SCRIPT = String.raw`(function () {
       if (s.other.trim() !== "") parts.push("その他: " + s.other.trim());
       html += '<div class="rv-summary-row"><div class="rv-summary-q">' + esc(q.question) + "</div>" +
         '<div class="rv-summary-a">' + esc(parts.join(" / ") || "（未回答）") + "</div>" +
+        (s.questionBack.trim() !== "" ? '<div class="rv-summary-a">聞き返し: ' + esc(s.questionBack.trim()) + "</div>" : "") +
         '<button type="button" class="rv-summary-edit" data-i="' + i + '">修正</button></div>';
     });
     cardEl.className = "rv-card";
@@ -459,7 +478,9 @@ const CLIENT_SCRIPT = String.raw`(function () {
 
   function submit() {
     var payload = { answers: state.map(function (s) {
-      return { selected: s.selected, other: s.other.trim() === "" ? null : s.other.trim() };
+      var a = { selected: s.selected, other: s.other.trim() === "" ? null : s.other.trim() };
+      if (s.questionBack.trim() !== "") a.questionBack = s.questionBack.trim();
+      return a;
     }) };
     nextBtn.disabled = true;
     fetch(postUrl, {
@@ -789,7 +810,7 @@ function requestListener(
           return;
         }
 
-        let validated: Array<{ selected: string[]; other: string | null }>;
+        let validated: Array<{ selected: string[]; other: string | null; questionBack: string | null }>;
         try {
           validated = validateAnswersPayload(bodyRaw, doc);
         } catch (e) {
@@ -801,12 +822,17 @@ function requestListener(
         const resultDoc: AnswersDoc = {
           title: doc.title,
           answeredAt: new Date().toISOString(),
-          answers: doc.questions.map((q, i) => ({
-            question: q.question,
-            header: q.header ?? "",
-            selected: validated[i].selected,
-            other: validated[i].other,
-          })),
+          answers: doc.questions.map((q, i) => {
+            const a: AnswerOut = {
+              question: q.question,
+              header: q.header ?? "",
+              selected: validated[i].selected,
+              other: validated[i].other,
+            };
+            const qb = validated[i].questionBack;
+            if (qb !== null) a.questionBack = qb;
+            return a;
+          }),
         };
 
         accepted = true;
