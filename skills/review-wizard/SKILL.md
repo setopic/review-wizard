@@ -36,7 +36,7 @@ AskUserQuestion のブラウザ版。複数の質問（選択肢・複数選択�
       "header": "見出しチップ（省略可）",
       "multiSelect": false,
       "options": [
-        { "label": "選択肢A", "description": "補足説明（省略可）", "preview": "<svg>…</svg> 等の見本（省略可・既定で描画）" },
+        { "label": "選択肢A", "description": "補足説明（省略可）", "recommended": true, "preview": "<svg>…</svg> 等の見本（省略可・既定で描画）" },
         { "label": "選択肢B", "description": "補足説明（省略可）" }
       ],
       "detail": "<table>…</table> / <svg>…</svg> 等のリッチ説明（省略可・既定で描画）"
@@ -47,6 +47,11 @@ AskUserQuestion のブラウザ版。複数の質問（選択肢・複数選択�
 
 - `questions` は 1 件以上、各質問の `options` は 2 件以上必須。
 - `multiSelect: true` で複数選択可、既定は単一選択。
+- おすすめの選択肢には `"recommended": true`（真偽値。省略可）を付ける。ラベルの横に「推奨」の
+  印が出る（`--no-rich` でも出る）。**おすすめは先頭に置いて `recommended: true` を付ける**
+  （AskUserQuestion の「(Recommended)」と同じ作法）。並べ替えはしないので、順番は options の
+  順のまま。回答 JSON の `selected` は label のままで、「推奨」の文字は入らない。ラベルに
+  「(推奨)」と書き足さない。
 - 各質問には「その他」自由記述欄が自動で付く（options に含める必要はない）。
 - **図版・表で質問の意図を詳しく説明したいとき**は、質問に任意の `detail` を足す。
   `detail` は既定で質問文の下に **信頼 HTML** として描画される（詳しい書き方は後述の

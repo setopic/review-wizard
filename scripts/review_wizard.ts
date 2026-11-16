@@ -37,6 +37,7 @@ import { spawn } from "node:child_process";
 interface QuestionOption {
   label: string;
   description?: string;
+  recommended?: boolean; // 任意。true の選択肢に「推奨」の印を出す（--no-rich でも出す）。
   preview?: string; // 任意。既定で信頼 HTML（インライン SVG など）として選択肢カード内に描画する（--no-rich で無効化）。
 }
 
@@ -141,7 +142,12 @@ function validateQuestionsDoc(raw: unknown): QuestionsDoc {
         throw new Error(`review_wizard: questions[${i}].options[${j}].preview は文字列である必要があります。`);
       }
       const preview = typeof previewRaw === "string" && previewRaw !== "" ? previewRaw : undefined;
+      const recommendedRaw = oRaw["recommended"];
+      if (recommendedRaw !== undefined && typeof recommendedRaw !== "boolean") {
+        throw new Error(`review_wizard: questions[${i}].options[${j}].recommended は真偽値である必要があります。`);
+      }
       const opt: QuestionOption = { label };
+      if (recommendedRaw === true) opt.recommended = true;
       if (description !== undefined) opt.description = description;
       if (preview !== undefined) opt.preview = preview;
       return opt;
@@ -267,6 +273,7 @@ h1 { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 1.35rem
 .rv-option.selected { border-color: var(--rv-accent); background: var(--rv-accent-soft); }
 .rv-option input { margin-right: .6rem; accent-color: var(--rv-accent); }
 .rv-option-label { font-weight: bold; }
+.rv-badge { display: inline-block; margin-left: .6rem; background: var(--rv-accent); color: #fff; font-size: .72rem; font-weight: bold; padding: .1rem .55rem; border-radius: 999px; vertical-align: middle; }
 .rv-option-preview { margin: .6rem 0 0 1.4rem; overflow-x: auto; }
 .rv-option-preview img, .rv-option-preview svg { max-width: 100%; height: auto; }
 .rv-option-desc { color: var(--rv-ink-soft); font-size: .85rem; margin-top: .3rem; margin-left: 1.4rem; line-height: 1.7; }
@@ -356,7 +363,8 @@ const CLIENT_SCRIPT = String.raw`(function () {
       var checked = s.selected.indexOf(opt.label) !== -1;
       html += '<label class="rv-option' + (checked ? " selected" : "") + '" data-idx="' + i + '">' +
         '<input type="' + inputType + '" name="q' + step + '"' + (checked ? " checked" : "") + " readonly>" +
-        '<span class="rv-option-label">' + esc(opt.label) + "</span>";
+        '<span class="rv-option-label">' + esc(opt.label) + "</span>" +
+        (opt.recommended ? '<span class="rv-badge">推奨</span>' : "");
       if (opt.description) html += '<div class="rv-option-desc">' + esc(opt.description) + "</div>";
       // preview も detail と同じく rich のときのみサーバがデータに含める（信頼 HTML）。
       if (opt.preview) html += '<div class="rv-option-preview">' + opt.preview + "</div>";
