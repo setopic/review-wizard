@@ -37,6 +37,7 @@ import { spawn } from "node:child_process";
 interface QuestionOption {
   label: string;
   description?: string;
+  preview?: string; // 任意。既定で信頼 HTML（インライン SVG など）として選択肢カード内に描画する（--no-rich で無効化）。
 }
 
 interface Question {
@@ -135,7 +136,15 @@ function validateQuestionsDoc(raw: unknown): QuestionsDoc {
       }
       const descRaw = oRaw["description"];
       const description = typeof descRaw === "string" && descRaw !== "" ? descRaw : undefined;
-      return description !== undefined ? { label, description } : { label };
+      const previewRaw = oRaw["preview"];
+      if (previewRaw !== undefined && typeof previewRaw !== "string") {
+        throw new Error(`review_wizard: questions[${i}].options[${j}].preview は文字列である必要があります。`);
+      }
+      const preview = typeof previewRaw === "string" && previewRaw !== "" ? previewRaw : undefined;
+      const opt: QuestionOption = { label };
+      if (description !== undefined) opt.description = description;
+      if (preview !== undefined) opt.preview = preview;
+      return opt;
     });
 
     const detailRaw = qRaw["detail"];
@@ -258,6 +267,8 @@ h1 { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 1.35rem
 .rv-option.selected { border-color: var(--rv-accent); background: var(--rv-accent-soft); }
 .rv-option input { margin-right: .6rem; accent-color: var(--rv-accent); }
 .rv-option-label { font-weight: bold; }
+.rv-option-preview { margin: .6rem 0 0 1.4rem; overflow-x: auto; }
+.rv-option-preview img, .rv-option-preview svg { max-width: 100%; height: auto; }
 .rv-option-desc { color: var(--rv-ink-soft); font-size: .85rem; margin-top: .3rem; margin-left: 1.4rem; line-height: 1.7; }
 .rv-other { margin-top: .9rem; }
 .rv-other label { display: block; font-size: .85rem; color: var(--rv-ink-soft); margin-bottom: .4rem; }
@@ -347,6 +358,8 @@ const CLIENT_SCRIPT = String.raw`(function () {
         '<input type="' + inputType + '" name="q' + step + '"' + (checked ? " checked" : "") + " readonly>" +
         '<span class="rv-option-label">' + esc(opt.label) + "</span>";
       if (opt.description) html += '<div class="rv-option-desc">' + esc(opt.description) + "</div>";
+      // preview も detail と同じく rich のときのみサーバがデータに含める（信頼 HTML）。
+      if (opt.preview) html += '<div class="rv-option-preview">' + opt.preview + "</div>";
       html += "</label>";
     });
     html += '<div class="rv-other"><label>その他（自由記述）</label>' +
@@ -474,13 +487,18 @@ const CLIENT_SCRIPT = String.raw`(function () {
  * req_status.ts の explorerDataJson と同じ流儀（`<` を < にして </script> 混入を防ぐ）。
  */
 function reviewDataJson(doc: QuestionsDoc, postUrl: string, rich: boolean): string {
-  // rich=false（--no-rich 指定時）は detail をクライアントへ渡さない（HTML 注入自体を起こさない）。
+  // rich=false（--no-rich 指定時）は detail と options[].preview をクライアントへ渡さない（HTML 注入自体を起こさない）。
   const questions = rich
     ? doc.questions
     : doc.questions.map((q) => {
-        if (q.detail === undefined) return q;
         const { detail, ...rest } = q;
-        return rest;
+        return {
+          ...rest,
+          options: q.options.map((o) => {
+            const { preview, ...optRest } = o;
+            return optRest;
+          }),
+        };
       });
   const data = { title: doc.title, questions, postUrl };
   return JSON.stringify(data).replace(/</g, "\\u003c");
