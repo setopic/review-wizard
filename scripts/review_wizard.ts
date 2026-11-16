@@ -268,6 +268,15 @@ h1 { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 1.35rem
 .rv-detail th { background: var(--rv-accent-soft); color: var(--rv-accent-strong); }
 .rv-detail pre { background: var(--rv-accent-soft); border: 1px solid var(--rv-card-border); border-radius: 6px; padding: .8rem 1rem; overflow-x: auto; }
 .rv-detail code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rv-options { min-width: 0; }
+@media (min-width: 960px) {
+  body.rv-wide { max-width: 1180px; }
+  .rv-card.rv-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); column-gap: 2.4rem; align-items: start; }
+  .rv-card.rv-split > .rv-header-chip { grid-column: 1; justify-self: start; }
+  .rv-card.rv-split > .rv-question { grid-column: 1; }
+  .rv-card.rv-split > .rv-options { grid-column: 1; }
+  .rv-card.rv-split > .rv-detail { grid-column: 2; grid-row: 1 / span 3; margin: 0; }
+}
 .rv-option { display: block; border: 1px solid var(--rv-card-border); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: .9rem; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
 .rv-option:hover { border-color: var(--rv-accent); background: var(--rv-accent-soft); }
 .rv-option.selected { border-color: var(--rv-accent); background: var(--rv-accent-soft); }
@@ -358,6 +367,10 @@ const CLIENT_SCRIPT = String.raw`(function () {
     // detail は rich（既定 true、--no-rich で false）のときのみサーバがデータに含める。
     // 信頼 HTML として非エスケープで挿入する。
     if (q.detail) html += '<div class="rv-detail">' + q.detail + "</div>";
+    // detail があるときは、広い画面（CSS のメディアクエリ）で問い・選択肢を左、detail を右に並べる。
+    cardEl.className = "rv-card" + (q.detail ? " rv-split" : "");
+    document.body.classList.toggle("rv-wide", !!q.detail);
+    html += '<div class="rv-options">';
     var inputType = q.multiSelect ? "checkbox" : "radio";
     q.options.forEach(function (opt, i) {
       var checked = s.selected.indexOf(opt.label) !== -1;
@@ -371,7 +384,7 @@ const CLIENT_SCRIPT = String.raw`(function () {
       html += "</label>";
     });
     html += '<div class="rv-other"><label>その他（自由記述）</label>' +
-      '<input type="text" id="rv-other-input" value="' + esc(s.other) + '"></div>';
+      '<input type="text" id="rv-other-input" value="' + esc(s.other) + '"></div></div>';
     cardEl.innerHTML = html;
 
     Array.prototype.forEach.call(cardEl.querySelectorAll(".rv-option"), function (optLabelEl) {
@@ -406,6 +419,8 @@ const CLIENT_SCRIPT = String.raw`(function () {
         '<div class="rv-summary-a">' + esc(parts.join(" / ") || "（未回答）") + "</div>" +
         '<button type="button" class="rv-summary-edit" data-i="' + i + '">修正</button></div>';
     });
+    cardEl.className = "rv-card";
+    document.body.classList.remove("rv-wide");
     cardEl.innerHTML = html;
     Array.prototype.forEach.call(cardEl.querySelectorAll(".rv-summary-edit"), function (btn) {
       btn.addEventListener("click", function () {

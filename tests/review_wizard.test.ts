@@ -257,6 +257,41 @@ test("--rich (backward-compat no-op) still embeds question.detail", async () => 
   }
 });
 
+test("detail layout: the page carries the two-column CSS (>=960px) and applies rv-split only when a question has detail", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, DETAIL_QUESTIONS);
+
+  const rich = await startReview(["--no-open", "--questions", qpath, "--port", "0"]);
+  try {
+    const html = await (await fetch(rich.url)).text();
+    assert.ok(/@media \(min-width: 960px\)/.test(html), "wide-screen media query should be present");
+    assert.ok(html.includes(".rv-card.rv-split"), "two-column CSS should be present");
+    assert.ok(
+      html.includes('"rv-card" + (q.detail ? " rv-split" : "")'),
+      "rv-split should be applied only when q.detail is set",
+    );
+    assert.ok(html.includes('cardEl.className = "rv-card";'), "the summary step should not be split");
+  } finally {
+    if (rich.proc.exitCode === null && !rich.proc.killed) rich.proc.kill();
+  }
+});
+
+test("detail layout: with --no-rich the data carries no detail, so no question gets rv-split", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, DETAIL_QUESTIONS);
+
+  const plain = await startReview(["--no-open", "--no-rich", "--questions", qpath, "--port", "0"]);
+  try {
+    const html = await (await fetch(plain.url)).text();
+    const m = html.match(/<script[^>]*id="review-data"[^>]*>([\s\S]*?)<\/script>/);
+    assert.ok(m, "review-data script should exist");
+    const data = JSON.parse(m![1]);
+    assert.ok(data.questions.every((q: { detail?: string }) => q.detail === undefined));
+  } finally {
+    if (plain.proc.exitCode === null && !plain.proc.killed) plain.proc.kill();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 3b. 選択肢の見本 (options[].preview)
 // ---------------------------------------------------------------------------
