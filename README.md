@@ -201,6 +201,12 @@ npm test
 本文の上限、守りのヘッダ）・タイムアウト・`--host` と LAN の URL の組み立てを
 子プロセス＋HTTP 経由で検証する。
 
+## 版の上げ方
+
+版は `.claude-plugin/plugin.json` の `version` だけで持つ（`marketplace.json` には版を書かない）。
+`skills/review-wizard/SKILL.md` や機能を変えたら、別の PR でここを上げる。
+新しい機能はマイナー、修正はパッチを上げる。
+
 ## ライセンス・作者
 
 `.claude-plugin/plugin.json` を参照。

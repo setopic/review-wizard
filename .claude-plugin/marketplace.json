@@ -4,8 +4,7 @@
     "name": "Junji UEHARA"
   },
   "metadata": {
-    "description": "review-wizard（複数の質問をブラウザのウィザードUIで提示し回答JSONを取得するツール）を配布するローカル・マーケットプレイス。",
-    "version": "0.1.0"
+    "description": "review-wizard（複数の質問をブラウザのウィザードUIで提示し回答JSONを取得するツール）を配布するローカル・マーケットプレイス。"
   },
   "plugins": [
     {
