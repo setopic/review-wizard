@@ -258,6 +258,64 @@ test("--rich (backward-compat no-op) still embeds question.detail", async () => 
 });
 
 // ---------------------------------------------------------------------------
+// 3b. 選択肢の見本 (options[].preview)
+// ---------------------------------------------------------------------------
+
+const PREVIEW_QUESTIONS = {
+  title: "見本テスト",
+  questions: [
+    {
+      question: "どちらの配置にしますか？",
+      options: [
+        { label: "縦", preview: '<svg width="120" height="60"><text>PREVIEWTOKEN_ABC</text></svg>' },
+        { label: "横" },
+      ],
+    },
+  ],
+};
+
+test("by default options[].preview is embedded", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, PREVIEW_QUESTIONS);
+  const rich = await startReview(["--no-open", "--questions", qpath, "--port", "0"]);
+  try {
+    const html = await (await fetch(rich.url)).text();
+    assert.ok(html.includes("PREVIEWTOKEN_ABC"), "by default, preview should be embedded");
+  } finally {
+    if (rich.proc.exitCode === null && !rich.proc.killed) rich.proc.kill();
+  }
+});
+
+test("--no-rich strips options[].preview", async () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, PREVIEW_QUESTIONS);
+  const plain = await startReview(["--no-open", "--no-rich", "--questions", qpath, "--port", "0"]);
+  try {
+    const html = await (await fetch(plain.url)).text();
+    assert.ok(!html.includes("PREVIEWTOKEN_ABC"), "with --no-rich, preview should be stripped");
+    assert.ok(html.includes("どちらの配置にしますか？"), "question itself should remain");
+  } finally {
+    if (plain.proc.exitCode === null && !plain.proc.killed) plain.proc.kill();
+  }
+});
+
+test("exits 1 with Japanese stderr when options[].preview is not a string", () => {
+  const tmp = mkTmpDir();
+  const qpath = writeQuestionsFixture(tmp, {
+    title: "t",
+    questions: [{ question: "q", options: [{ label: "a", preview: 123 }, { label: "b" }] }],
+  });
+  const proc = spawnSync(
+    process.execPath,
+    [REVIEW_SCRIPT, "--no-open", "--questions", qpath, "--out", path.join(tmp, "out.json")],
+    { encoding: "utf-8" },
+  );
+  assert.equal(proc.status, 1);
+  assert.match(proc.stderr, /preview/);
+  assert.ok(/[぀-ヿ一-鿿]/.test(proc.stderr), "stderr should contain Japanese message");
+});
+
+// ---------------------------------------------------------------------------
 // 4. タイムアウト
 // ---------------------------------------------------------------------------
 
